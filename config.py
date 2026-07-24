@@ -5,17 +5,17 @@ load_dotenv()
 
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "")
 
-CEREBRAS_API_KEYS = [
+GEMINI_API_KEYS = [
     key for key in [
-        os.environ.get("CEREBRAS_API_KEY_1", ""),
-        os.environ.get("CEREBRAS_API_KEY_2", ""),
-        os.environ.get("CEREBRAS_API_KEY_3", ""),
-        os.environ.get("CEREBRAS_API_KEY_4", ""),
-        os.environ.get("CEREBRAS_API_KEY_5", ""),
+        os.environ.get("GEMINI_API_KEY_1", ""),
+        os.environ.get("GEMINI_API_KEY_2", ""),
+        os.environ.get("GEMINI_API_KEY_3", ""),
+        os.environ.get("GEMINI_API_KEY_4", ""),
+        os.environ.get("GEMINI_API_KEY_5", ""),
     ] if key
 ]
 
-CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 try:
     OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
@@ -33,4 +33,4 @@ if OWNER_ID:
 
 TRIGGER_WORDS = ["الوزير", "يالوزير", "يا وزير", "وزير"]
 COMMAND_PREFIX = "!"
-AI_MODEL = "gpt-oss-120b"
+AI_MODEL = "gemini-3.5-flash"
