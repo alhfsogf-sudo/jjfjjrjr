@@ -33,4 +33,4 @@ if OWNER_ID:
 
 TRIGGER_WORDS = ["الوزير", "يالوزير", "يا وزير", "وزير"]
 COMMAND_PREFIX = "!"
-AI_MODEL = "llama-3.3-70b"
+AI_MODEL = "gpt-oss-120b"
