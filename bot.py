@@ -1,9 +1,13 @@
 import asyncio
 import logging
+import sys
 import discord
 from discord.ext import commands
 
 import config
+
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("bot")
@@ -41,7 +45,7 @@ async def main():
         log.warning("⚠️ لا يوجد أي شخص مصرح له (OWNER_ID فاضي) - البوت ما راح يستجيب لأي أحد.")
 
     try:
-        await bot.load_extension("cogs.architect")
+        await bot.load_extension("architect")
         log.info("✅ تم تحميل أداة البناء")
     except Exception as e:
         log.error(f"❌ فشل تحميل الأداة: {e}")
