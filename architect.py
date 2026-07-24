@@ -1,4 +1,5 @@
 import json
+import random
 import time
 from datetime import timedelta
 
@@ -294,35 +295,41 @@ class RateLimitExceededError(RuntimeError):
 
 
 class KeyRotator:
+    """
+    نظام Failover ذكي:
+    - يعتمد دائمًا على المفتاح الأول (index 0) كمصدر أساسي لكل طلب جديد.
+    - لا ينتقل لمفتاح تالٍ إلا عند التقاط RateLimitError (429) فعليًا.
+    - أي خطأ آخر غير متعلق بالحصة يُرفع مباشرة بدون تدوير عبثي للمفاتيح.
+    - عند الانتقال بين المفاتيح بسبب 429، ينتظر Jitter عشوائي (1.5-3 ثانية)
+      قبل إرسال الطلب على المفتاح التالي.
+    """
+
     def __init__(self, api_keys: list):
         if not api_keys:
-            raise RuntimeError("لا يوجد أي مفتاح Gemini API معرّف بمتغيرات البيئة.")
-        self.current_index = 0
+            raise RuntimeError("لا يوجد أي مفتاح API معرّف بمتغيرات البيئة.")
         self.clients = [OpenAI(api_key=k, base_url=config.GEMINI_BASE_URL) for k in api_keys]
-
-    @property
-    def current_client(self):
-        return self.clients[self.current_index]
-
-    def rotate(self):
-        self.current_index = (self.current_index + 1) % len(self.clients)
 
     async def create(self, **kwargs):
         last_error = None
         saw_rate_limit = False
-        for _ in range(len(self.clients)):
+
+        # كل طلب جديد يبدأ دائمًا من المفتاح الأول (index 0)
+        for index, client in enumerate(self.clients):
             try:
-                return await asyncio.to_thread(self.current_client.chat.completions.create, **kwargs)
+                return await asyncio.to_thread(client.chat.completions.create, **kwargs)
             except RateLimitError as e:
-                # خطأ 429 - ضغط عالي أو تجاوز حصة الدقيقة، مو بالضرورة انتهاء حصة اليوم
+                # خطأ 429 فقط - ضغط/حصة مؤقتة على هذا المفتاح تحديدًا
                 saw_rate_limit = True
                 last_error = e
-                self.rotate()
+                if index < len(self.clients) - 1:
+                    # تأخير عشوائي قبل تجربة المفتاح التالي
+                    await asyncio.sleep(random.uniform(1.5, 3.0))
                 continue
-            except Exception as e:
-                last_error = e
-                self.rotate()
-                continue
+            except Exception:
+                # أي خطأ غير متعلق بالحصة (مثل خطأ بالبارامترات أو الشبكة)
+                # لا داعي لتدوير كل المفاتيح عبثًا - نرفعه فورًا
+                raise
+
         if saw_rate_limit:
             raise RateLimitExceededError(f"كل المفاتيح صار عليها ضغط 429 مؤقت. آخر خطأ: {last_error}")
         raise RuntimeError(f"جميع مفاتيح API فشلت أو انتهت حصتها اليومية. آخر خطأ: {last_error}")
@@ -337,6 +344,8 @@ class Architect(commands.Cog):
         # آخر وقت نفذ فيه كل مستخدم أمر - لتطبيق المهلة الزمنية (Cooldown)
         self.last_command_time = {}
         self.cooldown_seconds = getattr(config, "COOLDOWN_SECONDS", 6)
+        # عدد أقصى للعناصر المحفوظة بذاكرة كل مستخدم (آخر محادثتين = 4 عناصر)
+        self.max_history_items = 4
 
     def _is_authorized(self, user_id: int) -> bool:
         return user_id in config.AUTHORIZED_USER_IDS
@@ -672,6 +681,10 @@ class Architect(commands.Cog):
 
     async def _process(self, query: str, guild: discord.Guild, user_id: int, channel: discord.abc.Messageable = None) -> str:
         history = self.history.setdefault(user_id, [])
+
+        # === تقليم صارم قبل الإرسال: نحتفظ بآخر محادثتين فقط (4 عناصر كحد أقصى) ===
+        history[:] = history[-self.max_history_items:]
+
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": query}]
 
         for _ in range(6):
@@ -694,7 +707,9 @@ class Architect(commands.Cog):
 
             if not msg.tool_calls:
                 final_text = msg.content or "تم."
-                self.history[user_id] = messages[1:][-20:]
+                # === تقليم صارم بعد استلام الرد: نفس الحد الأقصى (4 عناصر) ===
+                trimmed = messages[1:]
+                self.history[user_id] = trimmed[-self.max_history_items:]
                 return final_text
 
             for call in msg.tool_calls:
@@ -705,7 +720,8 @@ class Architect(commands.Cog):
                 result = await self.execute_tool(call.function.name, args, guild, channel)
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
 
-        self.history[user_id] = messages[1:][-20:]
+        # === تقليم صارم حتى لو انتهت الحلقة بدون رد نهائي ===
+        self.history[user_id] = messages[1:][-self.max_history_items:]
         return "نفذت عدة إجراءات، لكن الطلب كان معقدًا جدًا - جرب تقسمه لطلبات أبسط."
 
 
