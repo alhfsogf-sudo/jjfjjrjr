@@ -296,43 +296,60 @@ class RateLimitExceededError(RuntimeError):
 
 class KeyRotator:
     """
-    نظام Failover ذكي:
-    - يعتمد دائمًا على المفتاح الأول (index 0) كمصدر أساسي لكل طلب جديد.
-    - لا ينتقل لمفتاح تالٍ إلا عند التقاط RateLimitError (429) فعليًا.
-    - أي خطأ آخر غير متعلق بالحصة يُرفع مباشرة بدون تدوير عبثي للمفاتيح.
-    - عند الانتقال بين المفاتيح بسبب 429، ينتظر Jitter عشوائي (1.5-3 ثانية)
-      قبل إرسال الطلب على المفتاح التالي.
+    نظام تدوير وحماية متقدم (Failover + Jitter):
+    - يعتمد على المفاتيح بالتوالي ويتبدل تلقائياً عند أخطاء الحصة 429.
+    - تم تحديثه ليلتقط أخطاء السيرفرات وضغط المنصة (503 Unavailable) وينتقل للمفتاح التالي تلقائياً مع توقيت ذكي لضمان استقرار البوت.
     """
 
     def __init__(self, api_keys: list):
         if not api_keys:
             raise RuntimeError("لا يوجد أي مفتاح API معرّف بمتغيرات البيئة.")
+        self.current_index = 0
         self.clients = [OpenAI(api_key=k, base_url=config.GEMINI_BASE_URL) for k in api_keys]
+
+    @property
+    def current_client(self):
+        return self.clients[self.current_index]
+
+    def rotate(self):
+        self.current_index = (self.current_index + 1) % len(self.clients)
 
     async def create(self, **kwargs):
         last_error = None
         saw_rate_limit = False
 
-        # كل طلب جديد يبدأ دائمًا من المفتاح الأول (index 0)
-        for index, client in enumerate(self.clients):
+        for _ in range(len(self.clients)):
             try:
-                return await asyncio.to_thread(client.chat.completions.create, **kwargs)
+                return await asyncio.to_thread(self.current_client.chat.completions.create, **kwargs)
             except RateLimitError as e:
-                # خطأ 429 فقط - ضغط/حصة مؤقتة على هذا المفتاح تحديدًا
+                # خطأ 429 - تعدت الحصة أو معدل الطلبات
                 saw_rate_limit = True
                 last_error = e
-                if index < len(self.clients) - 1:
-                    # تأخير عشوائي قبل تجربة المفتاح التالي
-                    await asyncio.sleep(random.uniform(1.5, 3.0))
+                print(f"⚠️ المفتاح رقم {self.current_index + 1} واجه ضغطاً (429). جاري التبديل...")
+                self.rotate()
+                await asyncio.sleep(random.uniform(1.5, 3.0))
                 continue
-            except Exception:
-                # أي خطأ غير متعلق بالحصة (مثل خطأ بالبارامترات أو الشبكة)
-                # لا داعي لتدوير كل المفاتيح عبثًا - نرفعه فورًا
-                raise
+            except Exception as e:
+                error_str = str(e).lower()
+                # صيد ذكي لأخطاء السيرفرات المنضغطية 503 دون التسبب بانهيار الكود
+                if "503" in error_str or "unavailable" in error_str or "demand" in error_str:
+                    last_error = e
+                    print(f"🚨 سيرفر Cerebras مضغوط حالياً (503) للمفتاح {self.current_index + 1}. جاري تجربة مفتاح آخر...")
+                    self.rotate()
+                    # مهلة أطول قليلاً لتهدئة استجابة خوادم النموذج
+                    await asyncio.sleep(random.uniform(2.0, 4.0))
+                    continue
+                else:
+                    # أي خطأ آخر غريب يتم تمريره وتدوير المفتاح احترازياً
+                    last_error = e
+                    self.rotate()
+                    await asyncio.sleep(random.uniform(1.0, 2.0))
+                    continue
 
         if saw_rate_limit:
             raise RateLimitExceededError(f"كل المفاتيح صار عليها ضغط 429 مؤقت. آخر خطأ: {last_error}")
-        raise RuntimeError(f"جميع مفاتيح API فشلت أو انتهت حصتها اليومية. آخر خطأ: {last_error}")
+        
+        raise RuntimeError("⚠️ سيرفرات الذكاء الاصطناعي تعاني من ضغط هائل جداً حالياً (503) وتوقفت مؤقتاً، أعد المحاولة بعد دقيقة.")
 
 
 class Architect(commands.Cog):
@@ -341,10 +358,8 @@ class Architect(commands.Cog):
         self.ai = KeyRotator(config.GEMINI_API_KEYS)
         self.tools = build_openai_tools()
         self.history = {}
-        # آخر وقت نفذ فيه كل مستخدم أمر - لتطبيق المهلة الزمنية (Cooldown)
         self.last_command_time = {}
         self.cooldown_seconds = getattr(config, "COOLDOWN_SECONDS", 6)
-        # عدد أقصى للعناصر المحفوظة بذاكرة كل مستخدم (آخر محادثتين = 4 عناصر)
         self.max_history_items = 4
 
     def _is_authorized(self, user_id: int) -> bool:
@@ -657,7 +672,6 @@ class Architect(commands.Cog):
             await message.reply("عذرًا، هذي الأداة مخصصة لشخص محدد فقط. 🛡️")
             return
 
-        # مهلة زمنية (Cooldown) لكل مستخدم - تمنع الطلبات المتتالية بسرعة
         now = time.monotonic()
         last = self.last_command_time.get(message.author.id, 0.0)
         elapsed = now - last
@@ -697,10 +711,9 @@ class Architect(commands.Cog):
                     tool_choice="auto",
                 )
             except RateLimitExceededError:
-                # نرفعها للأعلى عشان on_message يمسكها ويرسل رسالة التنبيه اللطيفة
                 raise
             except RuntimeError as e:
-                return f"⚠️ تعذر الوصول للذكاء الاصطناعي حاليًا: {e}"
+                return f"{e}"
 
             msg = response.choices[0].message
             messages.append(msg.model_dump(exclude_none=True))
