@@ -1,16 +1,24 @@
 import json
+import time
+from datetime import timedelta
+
 import discord
 from discord.ext import commands
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 import asyncio
 
 import config
 
+SYSTEM_PROMPT = """أنتَ "الوزير"، أداة تنفيذية مباشرة تعمل كمساعد إدارة كامل الصلاحيات على سيرفر ديسكورد.
 
-SYSTEM_PROMPT = """أنتَ "الوزير"، أداة تنفيذية مباشرة تعمل علا مساعده الاداره علا السيطره علا السيرفر بل كامل وتنفيذ اي شي يطلب منك حتى لو كان خارج سياق هندسه السيرفر وان طلب منك الاونر او الأشخاص الموثوقين شيء تنفذه بسرعه وبدقه وتعديل هيكلة سيرفر ديسكورد.
-يستخدمك شخص محترف مسؤول عن بناء السيرفر بالكامل، وأنت تنفذ أوامره فورًا بدون تردد أو طلب تأكيد.
+أنت مو مخصص بس لبناء وتعديل هيكلة السيرفر (قنوات، فئات، رتب، صلاحيات)، بل مسؤول عن أي أمر إداري يطلبه منك الأونر أو الأشخاص الموثوقين - سواء كان طرد عضو، حظر (باند)، فك حظر، كتم (تايم آوت)، إزالة كتم، حذف رسائل بالجملة، تغيير اسم مستعار، أو أي تعديل بهيكلة السيرفر. نفذ أي طلب إداري يوصلك حتى لو كان خارج سياق هندسة السيرفر.
+
+يستخدمك شخص محترف مسؤول عن إدارة السيرفر بالكامل، وأنت تنفذ أوامره فورًا بدون تردد أو طلب تأكيد.
+
 تحدث بالعربية دائمًا. بعد تنفيذ أي طلب، اذكر بإيجاز ووضوح وش سويت بالضبط.
-إذا كان الطلب غامضًا لدرجة يستحيل تنفيذه (مثل اسم رتبة غير موجود بالمرة)، وضح المشكلة بدل التخمين العشوائي.
+
+إذا كان الطلب غامضًا لدرجة يستحيل تنفيذه (مثل اسم عضو أو رتبة غير موجود بالمرة)، وضح المشكلة بدل التخمين العشوائي.
+
 لا تسأل عن تأكيد أبدًا - نفذ مباشرة."""
 
 PERMISSION_ALIASES = {
@@ -190,6 +198,86 @@ TOOLS = [
         "description": "عرض قائمة كاملة بالفئات والقنوات والرتب الموجودة حاليًا بالسيرفر",
         "input_schema": {"type": "object", "properties": {}}
     },
+    {
+        "name": "kick_member",
+        "description": "طرد عضو من السيرفر",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "member_name": {"type": "string"},
+                "reason": {"type": "string"}
+            },
+            "required": ["member_name"]
+        }
+    },
+    {
+        "name": "ban_member",
+        "description": "حظر (باند) عضو من السيرفر",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "member_name": {"type": "string"},
+                "reason": {"type": "string"},
+                "delete_message_days": {"type": "integer"}
+            },
+            "required": ["member_name"]
+        }
+    },
+    {
+        "name": "unban_member",
+        "description": "فك الحظر عن مستخدم محظور، بالآيدي أو باسمه",
+        "input_schema": {
+            "type": "object",
+            "properties": {"user_identifier": {"type": "string"}},
+            "required": ["user_identifier"]
+        }
+    },
+    {
+        "name": "timeout_member",
+        "description": "كتم عضو (تايم آوت) لمدة محددة بالدقائق",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "member_name": {"type": "string"},
+                "minutes": {"type": "integer"},
+                "reason": {"type": "string"}
+            },
+            "required": ["member_name", "minutes"]
+        }
+    },
+    {
+        "name": "remove_timeout",
+        "description": "إزالة الكتم (التايم آوت) عن عضو",
+        "input_schema": {
+            "type": "object",
+            "properties": {"member_name": {"type": "string"}},
+            "required": ["member_name"]
+        }
+    },
+    {
+        "name": "purge_messages",
+        "description": "حذف عدد معين من آخر الرسائل بقناة معينة (أو بالقناة الحالية لو ما تحدد قناة)",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "channel_name": {"type": "string"},
+                "amount": {"type": "integer"}
+            },
+            "required": ["amount"]
+        }
+    },
+    {
+        "name": "set_nickname",
+        "description": "تغيير الاسم المستعار (nickname) لعضو",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "member_name": {"type": "string"},
+                "new_nickname": {"type": "string"}
+            },
+            "required": ["member_name", "new_nickname"]
+        }
+    },
 ]
 
 
@@ -198,6 +286,11 @@ def build_openai_tools():
         {"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["input_schema"]}}
         for t in TOOLS
     ]
+
+
+class RateLimitExceededError(RuntimeError):
+    """يُرفع لما كل المفاتيح ترجع 429 (ضغط مؤقت) بدل خطأ حقيقي بالمفتاح."""
+    pass
 
 
 class KeyRotator:
@@ -216,13 +309,22 @@ class KeyRotator:
 
     async def create(self, **kwargs):
         last_error = None
+        saw_rate_limit = False
         for _ in range(len(self.clients)):
             try:
                 return await asyncio.to_thread(self.current_client.chat.completions.create, **kwargs)
+            except RateLimitError as e:
+                # خطأ 429 - ضغط عالي أو تجاوز حصة الدقيقة، مو بالضرورة انتهاء حصة اليوم
+                saw_rate_limit = True
+                last_error = e
+                self.rotate()
+                continue
             except Exception as e:
                 last_error = e
                 self.rotate()
                 continue
+        if saw_rate_limit:
+            raise RateLimitExceededError(f"كل المفاتيح صار عليها ضغط 429 مؤقت. آخر خطأ: {last_error}")
         raise RuntimeError(f"جميع مفاتيح API فشلت أو انتهت حصتها اليومية. آخر خطأ: {last_error}")
 
 
@@ -232,6 +334,9 @@ class Architect(commands.Cog):
         self.ai = KeyRotator(config.GEMINI_API_KEYS)
         self.tools = build_openai_tools()
         self.history = {}
+        # آخر وقت نفذ فيه كل مستخدم أمر - لتطبيق المهلة الزمنية (Cooldown)
+        self.last_command_time = {}
+        self.cooldown_seconds = getattr(config, "COOLDOWN_SECONDS", 6)
 
     def _is_authorized(self, user_id: int) -> bool:
         return user_id in config.AUTHORIZED_USER_IDS
@@ -277,7 +382,7 @@ class Architect(commands.Cog):
                 resolved.append(key)
         return resolved
 
-    async def execute_tool(self, tool_name: str, tool_input: dict, guild: discord.Guild):
+    async def execute_tool(self, tool_name: str, tool_input: dict, guild: discord.Guild, invoking_channel: discord.abc.Messageable = None):
         try:
             if tool_name == "create_text_channel":
                 category = None
@@ -431,10 +536,82 @@ class Architect(commands.Cog):
                 roles = [r.name for r in guild.roles if r.name != "@everyone"]
                 return "الهيكلة الحالية:\n" + "\n".join(lines) + "\n\nالرتب: " + "، ".join(roles)
 
+            elif tool_name == "kick_member":
+                member = self._find_member(guild, tool_input["member_name"])
+                if not member:
+                    return f"لم أجد عضو باسم {tool_input['member_name']}."
+                await member.kick(reason=tool_input.get("reason") or "بأمر من الإدارة عبر الوزير")
+                return f"تم طرد العضو {member.display_name}."
+
+            elif tool_name == "ban_member":
+                member = self._find_member(guild, tool_input["member_name"])
+                if not member:
+                    return f"لم أجد عضو باسم {tool_input['member_name']}."
+                await member.ban(
+                    reason=tool_input.get("reason") or "بأمر من الإدارة عبر الوزير",
+                    delete_message_days=tool_input.get("delete_message_days", 0)
+                )
+                return f"تم حظر (باند) العضو {member.display_name}."
+
+            elif tool_name == "unban_member":
+                identifier = tool_input["user_identifier"].strip().lstrip("@")
+                target_user = None
+                async for ban_entry in guild.bans():
+                    u = ban_entry.user
+                    if identifier.isdigit() and u.id == int(identifier):
+                        target_user = u
+                        break
+                    if identifier.lower() in u.name.lower():
+                        target_user = u
+                        break
+                if not target_user:
+                    return f"لم أجد مستخدم محظور مطابق لـ {tool_input['user_identifier']}."
+                await guild.unban(target_user)
+                return f"تم فك الحظر عن {target_user.name}."
+
+            elif tool_name == "timeout_member":
+                member = self._find_member(guild, tool_input["member_name"])
+                if not member:
+                    return f"لم أجد عضو باسم {tool_input['member_name']}."
+                minutes = max(1, int(tool_input.get("minutes", 10)))
+                until = discord.utils.utcnow() + timedelta(minutes=minutes)
+                await member.timeout(until, reason=tool_input.get("reason") or "بأمر من الإدارة عبر الوزير")
+                return f"تم كتم العضو {member.display_name} لمدة {minutes} دقيقة."
+
+            elif tool_name == "remove_timeout":
+                member = self._find_member(guild, tool_input["member_name"])
+                if not member:
+                    return f"لم أجد عضو باسم {tool_input['member_name']}."
+                await member.timeout(None)
+                return f"تم إزالة الكتم عن العضو {member.display_name}."
+
+            elif tool_name == "purge_messages":
+                ch = None
+                if tool_input.get("channel_name"):
+                    ch = self._find_channel(guild, tool_input["channel_name"])
+                elif isinstance(invoking_channel, discord.TextChannel):
+                    ch = invoking_channel
+                if not ch or not isinstance(ch, discord.TextChannel):
+                    return "لم أجد قناة نصية صالحة لحذف الرسائل منها."
+                amount = max(1, min(int(tool_input.get("amount", 10)), 100))
+                deleted = await ch.purge(limit=amount)
+                return f"تم حذف {len(deleted)} رسالة من قناة {ch.name}."
+
+            elif tool_name == "set_nickname":
+                member = self._find_member(guild, tool_input["member_name"])
+                if not member:
+                    return f"لم أجد عضو باسم {tool_input['member_name']}."
+                await member.edit(nick=tool_input["new_nickname"])
+                return f"تم تغيير اسم العضو المستعار إلى {tool_input['new_nickname']}."
+
             return f"أداة غير معروفة: {tool_name}"
 
         except discord.Forbidden:
             return "لا أملك الصلاحيات الكافية لتنفيذ هذا الإجراء - تأكد أن رتبتي بالسيرفر مرتفعة بما يكفي."
+        except discord.HTTPException as e:
+            if getattr(e, "status", None) == 429:
+                return "⚠️ ديسكورد نفسه ضاغط علينا حاليًا (429)، جرب تعيد الأمر بعد شوي."
+            return f"حدث خطأ من ديسكورد أثناء التنفيذ: {str(e)}"
         except ValueError:
             return "قيمة غير صحيحة (تأكد من صيغة اللون مثلاً #FF00AA)."
         except Exception as e:
@@ -471,15 +648,29 @@ class Architect(commands.Cog):
             await message.reply("عذرًا، هذي الأداة مخصصة لشخص محدد فقط. 🛡️")
             return
 
+        # مهلة زمنية (Cooldown) لكل مستخدم - تمنع الطلبات المتتالية بسرعة
+        now = time.monotonic()
+        last = self.last_command_time.get(message.author.id, 0.0)
+        elapsed = now - last
+        if elapsed < self.cooldown_seconds:
+            remaining = round(self.cooldown_seconds - elapsed, 1)
+            await message.reply(f"⏳ تمهل شوي! ينفع ترسل أمر جديد بعد {remaining} ثانية.")
+            return
+        self.last_command_time[message.author.id] = now
+
         try:
             async with message.channel.typing():
-                reply = await self._process(query, message.guild, message.author.id)
+                reply = await self._process(query, message.guild, message.author.id, message.channel)
+        except RateLimitExceededError:
+            await message.reply("⚠️ الضغط عالٍ حالياً على الذكاء الاصطناعي، يرجى الانتظار بضع ثوانٍ وإعادة المحاولة!")
+            return
         except Exception as e:
             await message.reply(f"⚠️ صار خطأ غير متوقع أثناء التنفيذ: {e}")
             return
+
         await self._send_long(message, reply)
 
-    async def _process(self, query: str, guild: discord.Guild, user_id: int) -> str:
+    async def _process(self, query: str, guild: discord.Guild, user_id: int, channel: discord.abc.Messageable = None) -> str:
         history = self.history.setdefault(user_id, [])
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": query}]
 
@@ -492,6 +683,9 @@ class Architect(commands.Cog):
                     tools=self.tools,
                     tool_choice="auto",
                 )
+            except RateLimitExceededError:
+                # نرفعها للأعلى عشان on_message يمسكها ويرسل رسالة التنبيه اللطيفة
+                raise
             except RuntimeError as e:
                 return f"⚠️ تعذر الوصول للذكاء الاصطناعي حاليًا: {e}"
 
@@ -508,7 +702,7 @@ class Architect(commands.Cog):
                     args = json.loads(call.function.arguments) if call.function.arguments else {}
                 except json.JSONDecodeError:
                     args = {}
-                result = await self.execute_tool(call.function.name, args, guild)
+                result = await self.execute_tool(call.function.name, args, guild, channel)
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
 
         self.history[user_id] = messages[1:][-20:]
