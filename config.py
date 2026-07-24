@@ -14,7 +14,6 @@ GEMINI_API_KEYS = [
         os.environ.get("GEMINI_API_KEY_5", ""),
     ] if key
 ]
-
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 try:
@@ -31,6 +30,12 @@ for part in _extra_ids.split(","):
 if OWNER_ID:
     AUTHORIZED_USER_IDS.add(OWNER_ID)
 
-TRIGGER_WORDS = ["الوزير", "يالوزير", "يا وزير", "وزير"]
+TRIGGER_WORDS = ["جلب زهير", "عمو", "ياوزير", "وزير"]
 COMMAND_PREFIX = "!"
 AI_MODEL = "gemini-3.5-flash"
+
+# المهلة الزمنية (بالثواني) بين كل أمر وآخر لنفس المستخدم - لتفادي تجاوز حد 15 طلب/دقيقة
+try:
+    COOLDOWN_SECONDS = float(os.environ.get("COOLDOWN_SECONDS", "6"))
+except ValueError:
+    COOLDOWN_SECONDS = 6.0
