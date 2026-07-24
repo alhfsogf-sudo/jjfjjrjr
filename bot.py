@@ -38,8 +38,8 @@ async def main():
     if not config.DISCORD_TOKEN:
         log.error("❌ لم يتم تعيين DISCORD_TOKEN. أضفه بمتغيرات البيئة على Railway.")
         return
-    if not config.CEREBRAS_API_KEYS:
-        log.error("❌ لا يوجد أي مفتاح Cerebras API معرّف. أضف مفتاح واحد على الأقل.")
+    if not config.GEMINI_API_KEYS:
+        log.error("❌ لا يوجد أي مفتاح Gemini API معرّف. أضف مفتاح واحد على الأقل.")
         return
     if not config.AUTHORIZED_USER_IDS:
         log.warning("⚠️ لا يوجد أي شخص مصرح له (OWNER_ID فاضي) - البوت ما راح يستجيب لأي أحد.")
@@ -55,4 +55,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main()) 
