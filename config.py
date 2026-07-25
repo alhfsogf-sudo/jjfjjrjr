@@ -5,7 +5,7 @@ load_dotenv()
 
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "")
 
-# جلب المفاتيح الخمسة تلقائياً من بيئة عمل ريلواي
+# جلب المفاتيح تلقائياً من بيئة عمل Railway (حتى 5 مفاتيح، الفاضي يتجاهل تلقائيًا)
 GEMINI_API_KEYS = [
     key for key in [
         os.environ.get("GEMINI_API_KEY_1", ""),
@@ -16,7 +16,8 @@ GEMINI_API_KEYS = [
     ] if key
 ]
 
-# تم حذف الـ BASE_URL القديم تماماً ليتصل البوت عبر مكتبة جوجل الرسمية مباشرة وبدون وسيط
+# endpoint التوافق مع OpenAI الرسمي من قوقل - أكثر استقرارًا من مكتبة google.generativeai المتوقفة
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 try:
     OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
@@ -32,11 +33,11 @@ for part in _extra_ids.split(","):
 if OWNER_ID:
     AUTHORIZED_USER_IDS.add(OWNER_ID)
 
-# المناديات الخاصة بك 
+# المناديات الخاصة بك
 TRIGGER_WORDS = ["جلب زهير", "عمو", "ياوزير", "وزير"]
 COMMAND_PREFIX = "!"
 
-# تعديل اسم الموديل للاسم الرسمي المدعوم والمستقر من قوقل
+# اسم موديل Gemini الرسمي المدعوم عبر endpoint التوافق مع OpenAI
 AI_MODEL = "gemini-1.5-flash"
 
 # المهلة الزمنية لحماية البوت من التجميد والسبام
