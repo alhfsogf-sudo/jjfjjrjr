@@ -684,8 +684,13 @@ class Architect(commands.Cog):
         history = self.history.setdefault(user_id, [])
 
         # === تقليم صارم قبل الإرسال: نحتفظ بآخر محادثتين فقط (4 عناصر كحد أقصى) ===
+        # الذاكرة المحفوظة هنا تحتوي فقط على أزواج (سؤال المستخدم / الرد النهائي)
+        # بدون أي تفاصيل استدعاء أدوات وسيطة - عشان القص ما يكسر أبدًا تسلسل
+        # استدعاء الأداة/ردها المطلوب من جوجل.
         history[:] = history[-self.max_history_items:]
 
+        # قائمة الرسائل الفعلية لهذا الطلب - تتضمن تفاصيل استدعاء الأدوات مؤقتًا
+        # فقط لمدة هذا الطلب، وما تُحفظ بالذاكرة الدائمة أبدًا.
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": query}]
 
         for _ in range(6):
@@ -708,9 +713,9 @@ class Architect(commands.Cog):
 
             if not msg.tool_calls:
                 final_text = msg.content or "تم."
-                # === تقليم صارم بعد استلام الرد: نفس الحد الأقصى (4 عناصر) ===
-                trimmed = messages[1:]
-                self.history[user_id] = trimmed[-self.max_history_items:]
+                history.append({"role": "user", "content": query})
+                history.append({"role": "assistant", "content": final_text})
+                self.history[user_id] = history[-self.max_history_items:]
                 return final_text
 
             for call in msg.tool_calls:
@@ -721,8 +726,11 @@ class Architect(commands.Cog):
                 result = await self.execute_tool(call.function.name, args, guild, channel)
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
 
-        self.history[user_id] = messages[1:][-self.max_history_items:]
-        return "نفذت عدة إجراءات، لكن الطلب كان معقدًا جدًا - جرب تقسمه لطلبات أبسط."
+        fallback_text = "نفذت عدة إجراءات، لكن الطلب كان معقدًا جدًا - جرب تقسمه لطلبات أبسط."
+        history.append({"role": "user", "content": query})
+        history.append({"role": "assistant", "content": fallback_text})
+        self.history[user_id] = history[-self.max_history_items:]
+        return fallback_text
 
 
 async def setup(bot: commands.Bot):
