@@ -611,7 +611,7 @@ class Architect(commands.Cog):
                 if not member:
                     return f"لم أجد عضو باسم {tool_input['member_name']}."
                 await member.edit(nick=tool_input["new_nickname"])
-                return f"تم تغيير اسم العضو المستعار إلى {tool_input['new_nickname']}."
+                return f"تم غيرته اسم العضو المستعار إلى {tool_input['new_nickname']}."
 
             return f"أداة غير معروفة: {tool_name}"
 
@@ -644,17 +644,39 @@ class Architect(commands.Cog):
         content = message.content.strip()
         triggered = False
         query = content
+
+        # 1) كلمات النداء المعتادة
         for trigger in config.TRIGGER_WORDS:
             if content.startswith(trigger):
                 triggered = True
                 query = content[len(trigger):].strip(" ,،:") or "مرحبًا"
                 break
 
+        # 2) المنشن المباشر للبوت (@البوت)
+        if not triggered and self.bot.user in message.mentions:
+            triggered = True
+            cleaned = content
+            for mention_format in (f"<@{self.bot.user.id}>", f"<@!{self.bot.user.id}>"):
+                cleaned = cleaned.replace(mention_format, "")
+            query = cleaned.strip(" ,،:") or "مرحبًا"
+
+        # 3) الرد (Reply) على أي رسالة سابقة أرسلها البوت نفسه
+        if not triggered and message.reference:
+            ref_msg = message.reference.resolved
+            if ref_msg is None:
+                try:
+                    ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                except (discord.NotFound, discord.HTTPException):
+                    ref_msg = None
+            if isinstance(ref_msg, discord.Message) and ref_msg.author and ref_msg.author.id == self.bot.user.id:
+                triggered = True
+                query = content.strip() or "مرحبًا"
+
         if not triggered:
             return
 
         if not self._is_authorized(message.author.id):
-            await message.reply("عذرًا، هذي الأداة مخصصة لشخص محدد فقط. 🛡️")
+            await message.reply(" ولي انا بس لعمو زهير و حليب وجاي الشيوعي 🛡️")
             return
 
         # مهلة زمنية (Cooldown) لكل مستخدم - تمنع الطلبات المتتالية بسرعة
@@ -663,7 +685,7 @@ class Architect(commands.Cog):
         elapsed = now - last
         if elapsed < self.cooldown_seconds:
             remaining = round(self.cooldown_seconds - elapsed, 1)
-            await message.reply(f"⏳ تمهل شوي! ينفع ترسل أمر جديد بعد {remaining} ثانية.")
+            await message.reply(f"⏳ دنطي مجال وهسه اسويلك الامر مالتك مولاي بعد بعد ثانيه {remaining} ثانية.")
             return
         self.last_command_time[message.author.id] = now
 
