@@ -292,6 +292,41 @@ def build_openai_tools():
     ]
 
 
+# كلمات مفتاحية للأوامر "الإدارية" (طرد/حظر/كتم/رتب أعضاء/عرض) - مهلة قصيرة
+FAST_ACTION_KEYWORDS = [
+    "اطرد", "طرد", "احظر", "حظر", "باند", "بان",
+    "فك الحظر", "الغاء الحظر", "إلغاء الحظر", "فك حظر",
+    "كتم", "تايم اوت", "تايم آوت", "الغاء الكتم", "إلغاء الكتم", "ازالة الكتم", "إزالة الكتم", "شيل الكتم",
+    "حذف رسائل", "امسح رسائل", "نظف الرسائل", "بورج", "purge",
+    "غير اسمه", "غيّر اسمه", "غير الاسم المستعار", "غيّر الاسم المستعار", "نك نيم",
+    "اعطي رتبة", "اعطه رتبة", "اعطيه رتبة", "سحب رتبة", "شيل رتبة", "احذف رتبة منه",
+    "اعرض", "الهيكلة", "اظهر", "وضح", "اعرضلي",
+]
+
+# كلمات مفتاحية لأوامر "الإنشاء والتعديل الهيكلي" (قنوات/رتب/صلاحيات جديدة أو تعديلها) - مهلة أطول
+SLOW_ACTION_KEYWORDS = [
+    "انشئ", "أنشئ", "انشاء", "إنشاء", "اعمل", "سوي", "سو",
+    "قناة جديدة", "رتبة جديدة", "فئة جديدة", "روم جديد",
+    "احذف قناة", "احذف فئة", "احذف رتبة", "امسح قناة",
+    "اعد تسمية", "أعد تسمية", "غير اسم القناة", "غيّر اسم القناة", "غير اسم الرتبة", "غيّر اسم الرتبة",
+    "غير لون", "غيّر لون", "لون الرتبة", "صلاحيات", "نقل قناة", "نقل الفئة",
+    "سلومود", "سلو مود", "وصف القناة", "التوبيك", "الوصف",
+]
+
+
+def classify_cooldown(query: str, fast_seconds: float, slow_seconds: float) -> float:
+    """يحدد مهلة الانتظار المناسبة حسب نوع الأمر: إداري (فوري) أو إنشاء/هيكلة (طويل)."""
+    q = query.lower()
+    for kw in SLOW_ACTION_KEYWORDS:
+        if kw in q:
+            return slow_seconds
+    for kw in FAST_ACTION_KEYWORDS:
+        if kw in q:
+            return fast_seconds
+    # أي أمر غير مصنف بوضوح - نتعامل معه كـ"طويل" احتياطًا
+    return slow_seconds
+
+
 class RateLimitExceededError(RuntimeError):
     """يُرفع لما كل المفاتيح ترجع 429 (ضغط/حصة مؤقتة) فقط - مو أي خطأ آخر."""
     pass
@@ -343,7 +378,10 @@ class Architect(commands.Cog):
         self.tools = build_openai_tools()
         self.history = {}
         self.last_command_time = {}
-        self.cooldown_seconds = getattr(config, "COOLDOWN_SECONDS", 6)
+        self.cooldown_fast_seconds = getattr(config, "COOLDOWN_FAST_SECONDS", 2.0)
+        self.cooldown_slow_seconds = getattr(
+            config, "COOLDOWN_SLOW_SECONDS", getattr(config, "COOLDOWN_SECONDS", 6.0)
+        )
         # عدد أقصى للعناصر المحفوظة بذاكرة كل مستخدم (آخر محادثتين = 4 عناصر)
         self.max_history_items = 4
 
@@ -611,7 +649,7 @@ class Architect(commands.Cog):
                 if not member:
                     return f"لم أجد عضو باسم {tool_input['member_name']}."
                 await member.edit(nick=tool_input["new_nickname"])
-                return f"تم غيرته اسم العضو المستعار إلى {tool_input['new_nickname']}."
+                return f"تم تغيير اسم العضو المستعار إلى {tool_input['new_nickname']}."
 
             return f"أداة غير معروفة: {tool_name}"
 
@@ -676,16 +714,17 @@ class Architect(commands.Cog):
             return
 
         if not self._is_authorized(message.author.id):
-            await message.reply(" ولي انا بس لعمو زهير و حليب وجاي الشيوعي 🛡️")
+            await message.reply("عذرًا، هذي الأداة مخصصة لشخص محدد فقط. 🛡️")
             return
 
-        # مهلة زمنية (Cooldown) لكل مستخدم - تمنع الطلبات المتتالية بسرعة
+        # مهلة زمنية (Cooldown) لكل مستخدم - تختلف حسب نوع الأمر
+        cooldown = classify_cooldown(query, self.cooldown_fast_seconds, self.cooldown_slow_seconds)
         now = time.monotonic()
         last = self.last_command_time.get(message.author.id, 0.0)
         elapsed = now - last
-        if elapsed < self.cooldown_seconds:
-            remaining = round(self.cooldown_seconds - elapsed, 1)
-            await message.reply(f"⏳ دنطي مجال وهسه اسويلك الامر مالتك مولاي بعد بعد ثانيه {remaining} ثانية.")
+        if elapsed < cooldown:
+            remaining = round(cooldown - elapsed, 1)
+            await message.reply(f"⏳ تمهل شوي! ينفع ترسل أمر جديد بعد {remaining} ثانية.")
             return
         self.last_command_time[message.author.id] = now
 
