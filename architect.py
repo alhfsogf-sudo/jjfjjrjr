@@ -1,15 +1,17 @@
 import json
+import logging
 import random
 import time
 from datetime import timedelta
 
 import discord
 from discord.ext import commands
-import google.generativeai as genai
-from google.api_core import exceptions
+from openai import OpenAI, RateLimitError
 import asyncio
 
 import config
+
+log = logging.getLogger("architect")
 
 SYSTEM_PROMPT = """أنتَ "الوزير"، أداة تنفيذية مباشرة تعمل كمساعد إدارة كامل الصلاحيات على سيرفر ديسكورد.
 
@@ -44,179 +46,306 @@ PERMISSION_ALIASES = {
     "نقل الاعضاء": "move_members", "move_members": "move_members",
 }
 
-# تعريف الدوال لـ Gemini بشكل نظيف ومطابق تماماً لوظائف ديسكورد
-def create_text_channel(name: str, category: str = None, topic: str = None, nsfw: bool = False):
-    """إنشاء قناة نصية جديدة"""
-    pass
-
-def create_voice_channel(name: str, category: str = None, user_limit: int = 0):
-    """إنشاء روم صوتي جديد"""
-    pass
-
-def create_category(name: str):
-    """إنشاء فئة جديدة تجمع قنوات"""
-    pass
-
-def delete_channel(name: str):
-    """حذف قناة نصية أو صوتية أو فئة بالاسم"""
-    pass
-
-def rename_channel(old_name: str, new_name: str):
-    """إعادة تسمية قناة موجودة"""
-    pass
-
-def move_channel_to_category(channel_name: str, category_name: str):
-    """نقل قناة موجودة لفئة أخرى"""
-    pass
-
-def create_role(name: str, color_hex: str = None, hoist: bool = False, mentionable: bool = False):
-    """إنشاء رتبة جديدة بالسيرفر"""
-    pass
-
-def delete_role(name: str):
-    """حذف رتبة بالاسم"""
-    pass
-
-def rename_role(old_name: str, new_name: str):
-    """إعادة تسمية رتبة موجودة"""
-    pass
-
-def set_role_color(role_name: str, color_hex: str):
-    """تغيير لون رتبة موجودة"""
-    pass
-
-def assign_role(member_name: str, role_name: str):
-    """إعطاء رتبة لعضو معين"""
-    pass
-
-def remove_role(member_name: str, role_name: str):
-    """سحب رتبة من عضو"""
-    pass
-
-def set_role_permissions(role_name: str, grant: list[str] = None, revoke: list[str] = None):
-    """تعديل صلاحيات رتبة على مستوى السيرفر بالكامل"""
-    pass
-
-def set_channel_permission_overwrite(channel_name: str, role_name: str, allow: list[str] = None, deny: list[str] = None):
-    """تخصيص صلاحيات رتبة معينة داخل قناة معينة فقط"""
-    pass
-
-def set_channel_topic_or_slowmode(channel_name: str, topic: str = None, slowmode_seconds: int = None):
-    """تعديل وصف القناة أو وضع البطء (سلومود)"""
-    pass
-
-def list_current_structure():
-    """عرض قائمة كاملة بالفئات والقنوات والرتب الموجودة حاليًا بالسيرفر"""
-    pass
-
-def kick_member(member_name: str, reason: str = None):
-    """طرد عضو من السيرفر"""
-    pass
-
-def ban_member(member_name: str, reason: str = None, delete_message_days: int = 0):
-    """حظر (باند) عضو من السيرفر"""
-    pass
-
-def unban_member(user_identifier: str):
-    """فك الحظر عن مستخدم محظور، بالآيدي أو باسمه"""
-    pass
-
-def timeout_member(member_name: str, minutes: int, reason: str = None):
-    """كتم عضو (تايم آوت) لمدة محددة بالدقائق"""
-    pass
-
-def remove_timeout(member_name: str):
-    """إزالة الكتم (التايم آوت) عن عضو"""
-    pass
-
-def purge_messages(amount: int, channel_name: str = None):
-    """حذف عدد معين من آخر الرسائل بقناة معينة"""
-    pass
-
-def set_nickname(member_name: str, new_nickname: str):
-    """تغيير الاسم المستعار (nickname) لعضو"""
-    pass
-
-# قائمة الأدوات التي سيراها نموذج جينيريتيف
-GEMINI_TOOLS = [
-    create_text_channel, create_voice_channel, create_category, delete_channel,
-    rename_channel, move_channel_to_category, create_role, delete_role,
-    rename_role, set_role_color, assign_role, remove_role, set_role_permissions,
-    set_channel_permission_overwrite, set_channel_topic_or_slowmode,
-    list_current_structure, kick_member, ban_member, unban_member,
-    timeout_member, remove_timeout, purge_messages, set_nickname
+TOOLS = [
+    {
+        "name": "create_text_channel",
+        "description": "إنشاء قناة نصية جديدة",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "category": {"type": "string"},
+                "topic": {"type": "string"},
+                "nsfw": {"type": "boolean"}
+            },
+            "required": ["name"]
+        }
+    },
+    {
+        "name": "create_voice_channel",
+        "description": "إنشاء روم صوتي جديد",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "category": {"type": "string"},
+                "user_limit": {"type": "integer"}
+            },
+            "required": ["name"]
+        }
+    },
+    {
+        "name": "create_category",
+        "description": "إنشاء فئة جديدة تجمع قنوات",
+        "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}
+    },
+    {
+        "name": "delete_channel",
+        "description": "حذف قناة نصية أو صوتية أو فئة بالاسم",
+        "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}
+    },
+    {
+        "name": "rename_channel",
+        "description": "إعادة تسمية قناة موجودة",
+        "input_schema": {
+            "type": "object",
+            "properties": {"old_name": {"type": "string"}, "new_name": {"type": "string"}},
+            "required": ["old_name", "new_name"]
+        }
+    },
+    {
+        "name": "move_channel_to_category",
+        "description": "نقل قناة موجودة لفئة أخرى",
+        "input_schema": {
+            "type": "object",
+            "properties": {"channel_name": {"type": "string"}, "category_name": {"type": "string"}},
+            "required": ["channel_name", "category_name"]
+        }
+    },
+    {
+        "name": "create_role",
+        "description": "إنشاء رتبة جديدة بالسيرفر",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "color_hex": {"type": "string"},
+                "hoist": {"type": "boolean"},
+                "mentionable": {"type": "boolean"}
+            },
+            "required": ["name"]
+        }
+    },
+    {
+        "name": "delete_role",
+        "description": "حذف رتبة بالاسم",
+        "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}
+    },
+    {
+        "name": "rename_role",
+        "description": "إعادة تسمية رتبة موجودة",
+        "input_schema": {
+            "type": "object",
+            "properties": {"old_name": {"type": "string"}, "new_name": {"type": "string"}},
+            "required": ["old_name", "new_name"]
+        }
+    },
+    {
+        "name": "set_role_color",
+        "description": "تغيير لون رتبة موجودة",
+        "input_schema": {
+            "type": "object",
+            "properties": {"role_name": {"type": "string"}, "color_hex": {"type": "string"}},
+            "required": ["role_name", "color_hex"]
+        }
+    },
+    {
+        "name": "assign_role",
+        "description": "إعطاء رتبة لعضو معين",
+        "input_schema": {
+            "type": "object",
+            "properties": {"member_name": {"type": "string"}, "role_name": {"type": "string"}},
+            "required": ["member_name", "role_name"]
+        }
+    },
+    {
+        "name": "remove_role",
+        "description": "سحب رتبة من عضو",
+        "input_schema": {
+            "type": "object",
+            "properties": {"member_name": {"type": "string"}, "role_name": {"type": "string"}},
+            "required": ["member_name", "role_name"]
+        }
+    },
+    {
+        "name": "set_role_permissions",
+        "description": "تعديل صلاحيات رتبة على مستوى السيرفر بالكامل (منح أو سحب صلاحيات محددة)",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "role_name": {"type": "string"},
+                "grant": {"type": "array", "items": {"type": "string"}, "description": "قائمة الصلاحيات الممنوحة"},
+                "revoke": {"type": "array", "items": {"type": "string"}, "description": "قائمة الصلاحيات المسحوبة"}
+            },
+            "required": ["role_name"]
+        }
+    },
+    {
+        "name": "set_channel_permission_overwrite",
+        "description": "تخصيص صلاحيات رتبة معينة داخل قناة معينة فقط (مثل إخفاء قناة عن رتبة أو منعها من الكتابة)",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "channel_name": {"type": "string"},
+                "role_name": {"type": "string"},
+                "allow": {"type": "array", "items": {"type": "string"}},
+                "deny": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["channel_name", "role_name"]
+        }
+    },
+    {
+        "name": "set_channel_topic_or_slowmode",
+        "description": "تعديل وصف القناة أو وضع البطء (سلومود)",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "channel_name": {"type": "string"},
+                "topic": {"type": "string"},
+                "slowmode_seconds": {"type": "integer"}
+            },
+            "required": ["channel_name"]
+        }
+    },
+    {
+        "name": "list_current_structure",
+        "description": "عرض قائمة كاملة بالفئات والقنوات والرتب الموجودة حاليًا بالسيرفر",
+        "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "kick_member",
+        "description": "طرد عضو من السيرفر",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "member_name": {"type": "string"},
+                "reason": {"type": "string"}
+            },
+            "required": ["member_name"]
+        }
+    },
+    {
+        "name": "ban_member",
+        "description": "حظر (باند) عضو من السيرفر",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "member_name": {"type": "string"},
+                "reason": {"type": "string"},
+                "delete_message_days": {"type": "integer"}
+            },
+            "required": ["member_name"]
+        }
+    },
+    {
+        "name": "unban_member",
+        "description": "فك الحظر عن مستخدم محظور، بالآيدي أو باسمه",
+        "input_schema": {
+            "type": "object",
+            "properties": {"user_identifier": {"type": "string"}},
+            "required": ["user_identifier"]
+        }
+    },
+    {
+        "name": "timeout_member",
+        "description": "كتم عضو (تايم آوت) لمدة محددة بالدقائق",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "member_name": {"type": "string"},
+                "minutes": {"type": "integer"},
+                "reason": {"type": "string"}
+            },
+            "required": ["member_name", "minutes"]
+        }
+    },
+    {
+        "name": "remove_timeout",
+        "description": "إزالة الكتم (التايم آوت) عن عضو",
+        "input_schema": {
+            "type": "object",
+            "properties": {"member_name": {"type": "string"}},
+            "required": ["member_name"]
+        }
+    },
+    {
+        "name": "purge_messages",
+        "description": "حذف عدد معين من آخر الرسائل بقناة معينة (أو بالقناة الحالية لو ما تحدد قناة)",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "channel_name": {"type": "string"},
+                "amount": {"type": "integer"}
+            },
+            "required": ["amount"]
+        }
+    },
+    {
+        "name": "set_nickname",
+        "description": "تغيير الاسم المستعار (nickname) لعضو",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "member_name": {"type": "string"},
+                "new_nickname": {"type": "string"}
+            },
+            "required": ["member_name", "new_nickname"]
+        }
+    },
 ]
 
 
+def build_openai_tools():
+    return [
+        {"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["input_schema"]}}
+        for t in TOOLS
+    ]
+
+
 class RateLimitExceededError(RuntimeError):
+    """يُرفع لما كل المفاتيح ترجع 429 (ضغط/حصة مؤقتة) فقط - مو أي خطأ آخر."""
     pass
 
 
-class GeminiRotator:
+class KeyRotator:
     """
-    نظام تدوير متطور حقيقي لمفاتيح Gemini الرسمية:
-    يتجاوز المفاتيح المضغوطة ويمنع حظر الحسابات المؤقت.
+    نظام Failover ذكي عبر endpoint التوافق مع OpenAI (Gemini):
+    - كل طلب جديد يبدأ دائمًا من المفتاح الأول (index 0).
+    - لا ينتقل لمفتاح تالٍ إلا عند التقاط RateLimitError (429) فعليًا.
+    - أي خطأ آخر (شبكة، اسم موديل خاطئ، خطأ سيرفر غير متعلق بالحصة...) يُرفع
+      فورًا مع تسجيله كامل باللوق - بدون تدوير عبثي يخفي السبب الحقيقي.
+    - عند الانتقال بين المفاتيح بسبب 429 فقط، ينتظر Jitter عشوائي (1.5-3 ثانية).
     """
+
     def __init__(self, api_keys: list):
         if not api_keys:
-            raise RuntimeError("لا يوجد أي مفتاح API معرّف لـ Gemini في إعداداتك.")
-        self.api_keys = api_keys
-        self.current_index = 0
-        self.banned_keys = {}
+            raise RuntimeError("لا يوجد أي مفتاح API معرّف بمتغيرات البيئة.")
+        self.clients = [OpenAI(api_key=k, base_url=config.GEMINI_BASE_URL) for k in api_keys]
 
-    def rotate(self):
-        self.current_index = (self.current_index + 1) % len(self.api_keys)
+    async def create(self, **kwargs):
+        last_error = None
+        saw_rate_limit = False
 
-    def get_next_available_model(self):
-        now = time.monotonic()
-        for _ in range(len(self.api_keys)):
-            current_key = self.api_keys[self.current_index]
-            ban_expiry = self.banned_keys.get(current_key, 0)
-            
-            if now >= ban_expiry:
-                # تهيئة مباشرة لجوجل بدون أي وسيط طرف ثالث!
-                genai.configure(api_key=current_key)
-                return genai.GenerativeModel(
-                    model_name=getattr(config, "AI_MODEL", "gemini-1.5-flash"),
-                    system_instruction=SYSTEM_PROMPT,
-                    tools=GEMINI_TOOLS
-                )
-            else:
-                self.rotate()
-        return None
+        for index, client in enumerate(self.clients):
+            try:
+                return await asyncio.to_thread(client.chat.completions.create, **kwargs)
+            except RateLimitError as e:
+                saw_rate_limit = True
+                last_error = e
+                log.warning(f"🛑 المفتاح {index + 1} رجع 429 (ضغط/حصة): {e}")
+                if index < len(self.clients) - 1:
+                    await asyncio.sleep(random.uniform(1.5, 3.0))
+                continue
+            except Exception as e:
+                # أي خطأ غير 429 - نسجله كامل ونرفعه فورًا بدل ما نخفيه بتدوير المفاتيح
+                log.error(f"🚨 خطأ غير متعلق بالحصة على المفتاح {index + 1}: {e}")
+                raise
 
-    async def generate(self, contents, attempt=0):
-        if attempt >= len(self.api_keys):
-            raise RateLimitExceededError("⚠️ جميع مفاتيح قوقل مضغوطة حالياً، يرجى تكرار الأمر بعد دقيقة.")
-        
-        model = self.get_next_available_model()
-        if not model:
-            await asyncio.sleep(4.0)
-            return await self.generate(contents, attempt + 1)
-            
-        current_key = self.api_keys[self.current_index]
-        try:
-            return await asyncio.to_thread(model.generate_content, contents=contents)
-        except exceptions.ResourceExhausted:
-            self.banned_keys[current_key] = time.monotonic() + 60.0
-            print(f"🛑 المفتاح {self.current_index + 1} استهلك حصته. حظر مؤقت 60 ثانية لتنظيف الـ Rate Limit.")
-            self.rotate()
-            return await self.generate(contents, attempt + 1)
-        except exceptions.GoogleAPIError as e:
-            self.banned_keys[current_key] = time.monotonic() + 30.0
-            print(f"🚨 خطأ سيرفر من جوجل على المفتاح {self.current_index + 1}.")
-            self.rotate()
-            return await self.generate(contents, attempt + 1)
+        if saw_rate_limit:
+            raise RateLimitExceededError(f"كل المفاتيح صار عليها ضغط 429 مؤقت. آخر خطأ: {last_error}")
+        raise RuntimeError(f"جميع مفاتيح API فشلت. آخر خطأ: {last_error}")
 
 
 class Architect(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.ai = GeminiRotator(config.GEMINI_API_KEYS)
+        self.ai = KeyRotator(config.GEMINI_API_KEYS)
+        self.tools = build_openai_tools()
         self.history = {}
         self.last_command_time = {}
         self.cooldown_seconds = getattr(config, "COOLDOWN_SECONDS", 6)
-        self.max_history_items = 4 # المحافظة على تقليم الذاكرة لـ 4 عناصر
+        # عدد أقصى للعناصر المحفوظة بذاكرة كل مستخدم (آخر محادثتين = 4 عناصر)
+        self.max_history_items = 4
 
     def _is_authorized(self, user_id: int) -> bool:
         return user_id in config.AUTHORIZED_USER_IDS
@@ -528,6 +657,7 @@ class Architect(commands.Cog):
             await message.reply("عذرًا، هذي الأداة مخصصة لشخص محدد فقط. 🛡️")
             return
 
+        # مهلة زمنية (Cooldown) لكل مستخدم - تمنع الطلبات المتتالية بسرعة
         now = time.monotonic()
         last = self.last_command_time.get(message.author.id, 0.0)
         elapsed = now - last
@@ -541,68 +671,57 @@ class Architect(commands.Cog):
             async with message.channel.typing():
                 reply = await self._process(query, message.guild, message.author.id, message.channel)
         except RateLimitExceededError:
-            await message.reply("⚠️ الضغط عالٍ حالياً على مفاتيح جينوم، يرجى الانتظار دقيقة وإعادة الطلب.")
+            await message.reply("⚠️ الضغط عالٍ حالياً على الذكاء الاصطناعي (429 على كل المفاتيح)، يرجى الانتظار بضع ثوانٍ وإعادة المحاولة!")
             return
         except Exception as e:
-            await message.reply(f"⚠️ صار خطأ غير متوقع أثناء التنفيذ: {e}")
+            log.error(f"خطأ غير متوقع أثناء المعالجة: {e}")
+            await message.reply(f"⚠️ صار خطأ غير متوقع أثناء التنفيذ (راجع لوق Railway للتفاصيل): {e}")
             return
 
         await self._send_long(message, reply)
 
     async def _process(self, query: str, guild: discord.Guild, user_id: int, channel: discord.abc.Messageable = None) -> str:
         history = self.history.setdefault(user_id, [])
+
+        # === تقليم صارم قبل الإرسال: نحتفظ بآخر محادثتين فقط (4 عناصر كحد أقصى) ===
         history[:] = history[-self.max_history_items:]
 
-        # صياغة الذاكرة بطريقة قوقل الرسمية (role / parts)
-        formatted_messages = []
-        for h in history:
-            formatted_messages.append({"role": h["role"], "parts": [h["content"]]})
-        formatted_messages.append({"role": "user", "parts": [query]})
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": query}]
 
         for _ in range(6):
             try:
-                response = await self.ai.generate(contents=formatted_messages)
+                response = await self.ai.create(
+                    model=config.AI_MODEL,
+                    max_tokens=1024,
+                    messages=messages,
+                    tools=self.tools,
+                    tool_choice="auto",
+                )
             except RateLimitExceededError:
+                # نرفعها للأعلى عشان on_message يمسكها ويرسل رسالة التنبيه اللطيفة
                 raise
-            except RuntimeError as e:
-                return f"{e}"
+            except Exception as e:
+                return f"⚠️ تعذر الوصول للذكاء الاصطناعي حاليًا: {e}"
 
-            if response.candidates and response.candidates[0].content.parts:
-                part = response.candidates[0].content.parts[0]
-                
-                # إذا رجع نص عادي ينتهي التنفيذ
-                if hasattr(part, 'text') and part.text:
-                    final_text = part.text
-                    history.append({"role": "user", "content": query})
-                    history.append({"role": "model", "content": final_text})
-                    self.history[user_id] = history[-self.max_history_items:]
-                    return final_text
-                
-                # إذا طلب تشغيل دالة (Function Call)
-                elif hasattr(part, 'function_call') and part.function_call:
-                    call = part.function_call
-                    tool_name = call.name
-                    tool_input = dict(call.args) if call.args else {}
-                    
-                    # تنفيذ الأمر إدارياً
-                    result = await self.execute_tool(tool_name, tool_input, guild, channel)
-                    
-                    # تغذية الرد للنموذج لمتابعة السير
-                    formatted_messages.append({"role": "model", "parts": [part]})
-                    formatted_messages.append({
-                        "role": "tool",
-                        "parts": [{
-                            "function_response": {
-                                "name": tool_name,
-                                "response": {"result": result}
-                            }
-                        }]
-                    })
-                    continue
+            msg = response.choices[0].message
+            messages.append(msg.model_dump(exclude_none=True))
 
-            return "تم الإجراء بنجاح."
+            if not msg.tool_calls:
+                final_text = msg.content or "تم."
+                # === تقليم صارم بعد استلام الرد: نفس الحد الأقصى (4 عناصر) ===
+                trimmed = messages[1:]
+                self.history[user_id] = trimmed[-self.max_history_items:]
+                return final_text
 
-        self.history[user_id] = history[-self.max_history_items:]
+            for call in msg.tool_calls:
+                try:
+                    args = json.loads(call.function.arguments) if call.function.arguments else {}
+                except json.JSONDecodeError:
+                    args = {}
+                result = await self.execute_tool(call.function.name, args, guild, channel)
+                messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
+
+        self.history[user_id] = messages[1:][-self.max_history_items:]
         return "نفذت عدة إجراءات، لكن الطلب كان معقدًا جدًا - جرب تقسمه لطلبات أبسط."
 
 
