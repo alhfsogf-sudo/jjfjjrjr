@@ -34,11 +34,12 @@ if OWNER_ID:
     AUTHORIZED_USER_IDS.add(OWNER_ID)
 
 # المناديات الخاصة بك
-TRIGGER_WORDS = ["جلب زهير", "عمو", "ياوزير", "وزير"]
+TRIGGER_WORDS = ["جلب زهير", "عمو", "العبد", "وزير"]
 COMMAND_PREFIX = "!"
 
 # اسم موديل Gemini الرسمي المدعوم عبر endpoint التوافق مع OpenAI
-AI_MODEL = "gemini-1.5-flash"
+# ملاحظة: كل موديلات 1.0 و1.5 متقاعدة نهائيًا من قوقل (ترجع 404) - gemini-3.5-flash هو المستقر الحالي
+AI_MODEL = "gemini-3.5-flash"
 
 # المهلة الزمنية لحماية البوت من التجميد والسبام
 try:
