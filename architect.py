@@ -714,7 +714,7 @@ class Architect(commands.Cog):
             return
 
         if not self._is_authorized(message.author.id):
-            await message.reply("عذرًا، هذي الأداة مخصصة لشخص محدد فقط. 🛡️")
+            await message.reply("ولي انا بس لعمو زُهير وجاي وحليب الشيوعي هيهيهيهيهي")
             return
 
         # مهلة زمنية (Cooldown) لكل مستخدم - تختلف حسب نوع الأمر
