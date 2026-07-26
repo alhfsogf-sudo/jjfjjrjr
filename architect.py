@@ -30,10 +30,7 @@ SYSTEM_PROMPT = """أنتَ "الوزير"، مستشار إداري وعسكر�
 5. الغارات: يجب أن تكون قوة الهدف بين 80% و 120% من قوة المهاجم لحماية الضعفاء، والحد الأقصى هو 3 غارات على نفس الشخص كل 24 ساعة. درع المبتدئين يدوم 48 ساعة.
 6. السحر: يتطلب مذبح مستوى 5 للاستدعاء. السحرة المتاحين (Pyromancer, Arch-healer, Illusionist)، والمخلوقات (Dragon, Phoenix, Golem). البعثات السحرية (Expedition) نسبة نجاحها 5% وترتفع إلى 20% في الكسوف.
 
-تحدث دائماً بلهجة مستشار ملكي، فصيح، ومخلص. شجّع اللاعبين على استخدام أوامر المائل
-
-وايضا عليك تنفيذ كل ما يمليه عليك الأشخاص الموثوقون فلديك جميع الصلاحيات الاداريه والهندسية (Slash Commands) مثل /start, /upgrade, /train, /raid لإدارة إمبراطورياتهم."""
-"""
+تحدث دائماً بلهجة مستشار ملكي، فصيح، ومخلص. شجّع اللاعبين على استخدام أوامر المائل واعلم أن لديك كامل الصلاحيات الإدارية والهندسية لتنفيذ ما يطلبه الموثوقون عبر الـ Slash Commands مثل /start, /upgrade, /train, /raid لإدارة إمبراطورياتهم."""
 
 PERMISSION_ALIASES = {
     "ادارة القنوات": "manage_channels", "manage_channels": "manage_channels",
@@ -294,15 +291,12 @@ TOOLS = [
     },
 ]
 
-
 def build_openai_tools():
     return [
         {"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["input_schema"]}}
         for t in TOOLS
     ]
 
-
-# كلمات مفتاحية للأوامر "الإدارية" (طرد/حظر/كتم/رتب أعضاء/عرض) - مهلة قصيرة
 FAST_ACTION_KEYWORDS = [
     "اطرد", "طرد", "احظر", "حظر", "باند", "بان",
     "فك الحظر", "الغاء الحظر", "إلغاء الحظر", "فك حظر",
@@ -313,7 +307,6 @@ FAST_ACTION_KEYWORDS = [
     "اعرض", "الهيكلة", "اظهر", "وضح", "اعرضلي",
 ]
 
-# كلمات مفتاحية لأوامر "الإنشاء والتعديل الهيكلي" (قنوات/رتب/صلاحيات جديدة أو تعديلها) - مهلة أطول
 SLOW_ACTION_KEYWORDS = [
     "انشئ", "أنشئ", "انشاء", "إنشاء", "اعمل", "سوي", "سو",
     "قناة جديدة", "رتبة جديدة", "فئة جديدة", "روم جديد",
@@ -323,9 +316,7 @@ SLOW_ACTION_KEYWORDS = [
     "سلومود", "سلو مود", "وصف القناة", "التوبيك", "الوصف",
 ]
 
-
 def classify_cooldown(query: str, fast_seconds: float, slow_seconds: float) -> float:
-    """يحدد مهلة الانتظار المناسبة حسب نوع الأمر: إداري (فوري) أو إنشاء/هيكلة (طويل)."""
     q = query.lower()
     for kw in SLOW_ACTION_KEYWORDS:
         if kw in q:
@@ -333,25 +324,12 @@ def classify_cooldown(query: str, fast_seconds: float, slow_seconds: float) -> f
     for kw in FAST_ACTION_KEYWORDS:
         if kw in q:
             return fast_seconds
-    # أي أمر غير مصنف بوضوح - نتعامل معه كـ"طويل" احتياطًا
     return slow_seconds
 
-
 class RateLimitExceededError(RuntimeError):
-    """يُرفع لما كل المفاتيح ترجع 429 (ضغط/حصة مؤقتة) فقط - مو أي خطأ آخر."""
     pass
 
-
 class KeyRotator:
-    """
-    نظام Failover ذكي عبر endpoint التوافق مع OpenAI (Gemini):
-    - كل طلب جديد يبدأ دائمًا من المفتاح الأول (index 0).
-    - لا ينتقل لمفتاح تالٍ إلا عند التقاط RateLimitError (429) فعليًا.
-    - أي خطأ آخر (شبكة، اسم موديل خاطئ، خطأ سيرفر غير متعلق بالحصة...) يُرفع
-      فورًا مع تسجيله كامل باللوق - بدون تدوير عبثي يخفي السبب الحقيقي.
-    - عند الانتقال بين المفاتيح بسبب 429 فقط، ينتظر Jitter عشوائي (1.5-3 ثانية).
-    """
-
     def __init__(self, api_keys: list):
         if not api_keys:
             raise RuntimeError("لا يوجد أي مفتاح API معرّف بمتغيرات البيئة.")
@@ -372,14 +350,12 @@ class KeyRotator:
                     await asyncio.sleep(random.uniform(1.5, 3.0))
                 continue
             except Exception as e:
-                # أي خطأ غير 429 - نسجله كامل ونرفعه فورًا بدل ما نخفيه بتدوير المفاتيح
                 log.error(f"🚨 خطأ غير متعلق بالحصة على المفتاح {index + 1}: {e}")
                 raise
 
         if saw_rate_limit:
             raise RateLimitExceededError(f"كل المفاتيح صار عليها ضغط 429 مؤقت. آخر خطأ: {last_error}")
         raise RuntimeError(f"جميع مفاتيح API فشلت. آخر خطأ: {last_error}")
-
 
 class Architect(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -392,7 +368,6 @@ class Architect(commands.Cog):
         self.cooldown_slow_seconds = getattr(
             config, "COOLDOWN_SLOW_SECONDS", getattr(config, "COOLDOWN_SECONDS", 6.0)
         )
-        # عدد أقصى للعناصر المحفوظة بذاكرة كل مستخدم (آخر محادثتين = 4 عناصر)
         self.max_history_items = 4
 
     def _is_authorized(self, user_id: int) -> bool:
@@ -693,14 +668,12 @@ class Architect(commands.Cog):
         triggered = False
         query = content
 
-        # 1) كلمات النداء المعتادة
         for trigger in config.TRIGGER_WORDS:
             if content.startswith(trigger):
                 triggered = True
                 query = content[len(trigger):].strip(" ,،:") or "مرحبًا"
                 break
 
-        # 2) المنشن المباشر للبوت (@البوت)
         if not triggered and self.bot.user in message.mentions:
             triggered = True
             cleaned = content
@@ -708,7 +681,6 @@ class Architect(commands.Cog):
                 cleaned = cleaned.replace(mention_format, "")
             query = cleaned.strip(" ,،:") or "مرحبًا"
 
-        # 3) الرد (Reply) على أي رسالة سابقة أرسلها البوت نفسه
         if not triggered and message.reference:
             ref_msg = message.reference.resolved
             if ref_msg is None:
@@ -727,7 +699,6 @@ class Architect(commands.Cog):
             await message.reply("ولي انا بس لعمو زُهير وجاي وحليب الشيوعي هيهيهيهيهي")
             return
 
-        # مهلة زمنية (Cooldown) لكل مستخدم - تختلف حسب نوع الأمر
         cooldown = classify_cooldown(query, self.cooldown_fast_seconds, self.cooldown_slow_seconds)
         now = time.monotonic()
         last = self.last_command_time.get(message.author.id, 0.0)
@@ -753,15 +724,8 @@ class Architect(commands.Cog):
 
     async def _process(self, query: str, guild: discord.Guild, user_id: int, channel: discord.abc.Messageable = None) -> str:
         history = self.history.setdefault(user_id, [])
-
-        # === تقليم صارم قبل الإرسال: نحتفظ بآخر محادثتين فقط (4 عناصر كحد أقصى) ===
-        # الذاكرة المحفوظة هنا تحتوي فقط على أزواج (سؤال المستخدم / الرد النهائي)
-        # بدون أي تفاصيل استدعاء أدوات وسيطة - عشان القص ما يكسر أبدًا تسلسل
-        # استدعاء الأداة/ردها المطلوب من جوجل.
         history[:] = history[-self.max_history_items:]
 
-        # قائمة الرسائل الفعلية لهذا الطلب - تتضمن تفاصيل استدعاء الأدوات مؤقتًا
-        # فقط لمدة هذا الطلب، وما تُحفظ بالذاكرة الدائمة أبدًا.
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history + [{"role": "user", "content": query}]
 
         for _ in range(6):
@@ -774,7 +738,6 @@ class Architect(commands.Cog):
                     tool_choice="auto",
                 )
             except RateLimitExceededError:
-                # نرفعها للأعلى عشان on_message يمسكها ويرسل رسالة التنبيه اللطيفة
                 raise
             except Exception as e:
                 return f"⚠️ تعذر الوصول للذكاء الاصطناعي حاليًا: {e}"
@@ -802,7 +765,6 @@ class Architect(commands.Cog):
         history.append({"role": "assistant", "content": fallback_text})
         self.history[user_id] = history[-self.max_history_items:]
         return fallback_text
-
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Architect(bot))
