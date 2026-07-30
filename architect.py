@@ -350,11 +350,21 @@ class KeyRotator:
                     await asyncio.sleep(random.uniform(1.5, 3.0))
                 continue
             except Exception as e:
-                log.error(f"🚨 خطأ غير متعلق بالحصة على المفتاح {index + 1}: {e}")
+                # التقاط خطأ 503 أو 500 أو 504 ومعاملته كضغط مؤقت للانتقال للمفتاح التالي
+                error_str = str(e)
+                if "503" in error_str or "500" in error_str or "504" in error_str:
+                    saw_rate_limit = True
+                    last_error = e
+                    log.warning(f"⚠️ المفتاح {index + 1} واجه ضغط خوادم مؤقت (503/500): {e}")
+                    if index < len(self.clients) - 1:
+                        await asyncio.sleep(random.uniform(1.5, 3.0))
+                    continue
+                
+                log.error(f"🚨 خطأ غير متعلق بالحصة أو الضغط على المفتاح {index + 1}: {e}")
                 raise
 
         if saw_rate_limit:
-            raise RateLimitExceededError(f"كل المفاتيح صار عليها ضغط 429 مؤقت. آخر خطأ: {last_error}")
+            raise RateLimitExceededError(f"كل المفاتيح صار عليها ضغط 429 أو 503 مؤقت. آخر خطأ: {last_error}")
         raise RuntimeError(f"جميع مفاتيح API فشلت. آخر خطأ: {last_error}")
 
 class Architect(commands.Cog):
@@ -713,7 +723,7 @@ class Architect(commands.Cog):
             async with message.channel.typing():
                 reply = await self._process(query, message.guild, message.author.id, message.channel)
         except RateLimitExceededError:
-            await message.reply("⚠️ الضغط عالٍ حالياً على الذكاء الاصطناعي (429 على كل المفاتيح)، يرجى الانتظار بضع ثوانٍ وإعادة المحاولة!")
+            await message.reply("⚠️ الضغط عالٍ حالياً على الذكاء الاصطناعي (429/503 على كل المفاتيح)، يرجى الانتظار بضع ثوانٍ وإعادة المحاولة!")
             return
         except Exception as e:
             log.error(f"خطأ غير متوقع أثناء المعالجة: {e}")
@@ -768,3 +778,4 @@ class Architect(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Architect(bot))
+ 
