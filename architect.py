@@ -350,7 +350,6 @@ class KeyRotator:
                     await asyncio.sleep(random.uniform(1.5, 3.0))
                 continue
             except Exception as e:
-                # التقاط خطأ 503 أو 500 أو 504 ومعاملته كضغط مؤقت للانتقال للمفتاح التالي
                 error_str = str(e)
                 if "503" in error_str or "500" in error_str or "504" in error_str:
                     saw_rate_limit = True
@@ -702,6 +701,7 @@ class Architect(commands.Cog):
                 triggered = True
                 query = content.strip() or "مرحبًا"
 
+        # تفادي حظر التهدئة والرد على الرسائل التفاعلية المخصصة للـ Leaderboard
         if not triggered:
             return
 
