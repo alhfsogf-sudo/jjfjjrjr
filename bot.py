@@ -40,7 +40,7 @@ def save_data(data):
     except Exception as e:
         log.error(f"❌ خطأ في حفظ ملف الليدبورد: {e}")
 
-# رصد التفاعل بناءً على الرتبة المحددة لكل سيرفر
+# رصد التفاعل وزيادة النقاط للرتبة المحددة
 @bot.event
 async def on_message(message):
     if message.author.bot or not message.guild:
@@ -50,12 +50,10 @@ async def on_message(message):
     user_id = str(message.author.id)
     data = load_data()
 
-    # جلب إعدادات الرتبة المستهدفة لهذا السيرفر (إن وجدت)
     guild_settings = data.get(guild_id, {})
     target_role_id = guild_settings.get("target_role_id")
 
     if target_role_id:
-        # التحقق إذا كان العضو يمتلك الرتبة المحددة عبر الـ ID
         has_role = any(role.id == int(target_role_id) for role in message.author.roles)
         
         if has_role:
@@ -72,10 +70,10 @@ async def on_message(message):
     await bot.process_commands(message)
 
 # ------------------------------------------------------------------
-#  الأوامر المائلة (Slash Commands) المطورة
+#  الأوامر المائلة (Slash Commands) المصححة بالكامل
 # ------------------------------------------------------------------
 
-@bot.tree.command(name="انشاء-توب", description="تصفير الليدبورد وتحديد الرتبة المطلوب رصد تفاعلها")
+@bot.tree.command(name="انشاء-توب", description="تصفير الليدبورد وتحديد الرتبة المطلوب رصد تفاعلها (للإدارة)")
 @app_commands.describe(role="اختر الرتبة التي تريد حساب نقاط التفاعل لأعضائها")
 async def reset_leaderboard(interaction: discord.Interaction, role: discord.Role):
     # التحقق من الصلاحيات الإدارية من الـ config
@@ -86,7 +84,7 @@ async def reset_leaderboard(interaction: discord.Interaction, role: discord.Role
     guild_id = str(interaction.guild_id)
     data = load_data()
     
-    # تهيئة وتحديث بيانات السيرفر بالرتبة الجديدة وتصفير المستخدمين
+    # تهيئة السيرفر بالرتبة الجديدة تماماً وتصفير العداد القديم
     data[guild_id] = {
         "target_role_id": role.id,
         "target_role_name": role.name,
@@ -94,10 +92,10 @@ async def reset_leaderboard(interaction: discord.Interaction, role: discord.Role
     }
     save_data(data)
         
-    await interaction.response.send_message(f"🔄 تم تصفير الليدبورد بنجاح! بدأ رصد التفاعل الصافي الآن لأصحاب رتبة: **{role.name}** 🎯")
+    await interaction.response.send_message(f"🔄 تم تصفير الليدبورد وإعادة التهيئة! بدأ رصد التفاعل الصافي الآن لأصحاب رتبة: **{role.name}** 🎯")
 
 
-@bot.tree.command(name="توب", description="عرض لوحة الصدارة الحالية للرتبة المحددة")
+@bot.tree.command(name="توب", description="عرض لوحة الصدارة الحالية للرتبة المسجلة")
 async def leaderboard(interaction: discord.Interaction):
     guild_id = str(interaction.guild_id)
     data = load_data()
@@ -107,10 +105,10 @@ async def leaderboard(interaction: discord.Interaction):
     role_name = guild_data.get("target_role_name", "الرتبة المحددة")
     
     if not users_data:
-        await interaction.response.send_message(f"📭 لا توجد بيانات تفاعل مسجلة لرتبة (**{role_name}**) في هذا السيرفر بعد.", ephemeral=True)
+        await interaction.response.send_message(f"📭 لا توجد بيانات تفاعل مسجلة لرتبة (**{role_name}**) حالياً. استخدم `/انشاء-توب` أولاً لتحديد رتبة.", ephemeral=True)
         return
         
-    # ترتيب الأعضاء تنازلياً
+    # ترتيب الأعضاء تنازلياً حسب عدد الرسائل الصافية
     sorted_users = sorted(users_data.items(), key=lambda item: item[1]["messages"], reverse=True)
     
     embed = discord.Embed(
@@ -182,4 +180,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
- 
