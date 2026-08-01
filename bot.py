@@ -15,14 +15,11 @@ sys.stderr.reconfigure(line_buffering=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger("bot")
 
-# تفعيل الصلاحيات الكاملة لضمان عمل أوامر الطرد، الباند، وتعديل الرتب ونظام التوب بدون مشاكل
 intents = discord.Intents.all() 
-
-# بادئة الأوامر التقليدية
 bot = commands.Bot(command_prefix=getattr(config, "COMMAND_PREFIX", "!"), intents=intents, help_command=None)
 
 # ------------------------------------------------------------------
-#  إعدادات نظام الليدبورد الصافي وتخزين البيانات
+#  إعدادات نظام الليدبورد وتخزين البيانات
 # ------------------------------------------------------------------
 DATA_FILE = "leaderboard.json"
 
@@ -43,59 +40,89 @@ def save_data(data):
     except Exception as e:
         log.error(f"❌ خطأ في حفظ ملف الليدبورد: {e}")
 
-# رصد تفاعل رتبة "الوزير" وزيادة النقاط (الرسائل الصافية)
+# رصد التفاعل بناءً على الرتبة المحددة لكل سيرفر
 @bot.event
 async def on_message(message):
     if message.author.bot or not message.guild:
         return
 
-    # التحقق من وجود رتبة باسم "الوزير" لدى العضو المتفاعل
-    has_role = any(role.name == "الوزير" for role in message.author.roles)
-    
-    if has_role:
-        guild_id = str(message.guild.id)
-        user_id = str(message.author.id)
-        
-        data = load_data()
-        if guild_id not in data:
-            data[guild_id] = {}
-        
-        if user_id not in data[guild_id]:
-            data[guild_id][user_id] = {"messages": 0, "name": message.author.display_name}
-            
-        data[guild_id][user_id]["messages"] += 1
-        data[guild_id][user_id]["name"] = message.author.display_name  # تحديث الاسم لو تغير
-        save_data(data)
+    guild_id = str(message.guild.id)
+    user_id = str(message.author.id)
+    data = load_data()
 
-    # السماح للأوامر العادية والأحداث الأخرى بالعمل (مثل الـ Cog الخاص بـ architect)
+    # جلب إعدادات الرتبة المستهدفة لهذا السيرفر (إن وجدت)
+    guild_settings = data.get(guild_id, {})
+    target_role_id = guild_settings.get("target_role_id")
+
+    if target_role_id:
+        # التحقق إذا كان العضو يمتلك الرتبة المحددة عبر الـ ID
+        has_role = any(role.id == int(target_role_id) for role in message.author.roles)
+        
+        if has_role:
+            if "users" not in data[guild_id]:
+                data[guild_id]["users"] = {}
+            
+            if user_id not in data[guild_id]["users"]:
+                data[guild_id]["users"][user_id] = {"messages": 0, "name": message.author.display_name}
+                
+            data[guild_id]["users"][user_id]["messages"] += 1
+            data[guild_id]["users"][user_id]["name"] = message.author.display_name
+            save_data(data)
+
     await bot.process_commands(message)
 
 # ------------------------------------------------------------------
-#  الأوامر المائلة (Slash Commands) الخاصة بالليدبورد
+#  الأوامر المائلة (Slash Commands) المطورة
 # ------------------------------------------------------------------
 
-@bot.tree.command(name="توب", description="عرض ليدبورد المتفاعلين الصافي لرتبة الوزير")
+@bot.tree.command(name="انشاء-توب", description="تصفير الليدبورد وتحديد الرتبة المطلوب رصد تفاعلها")
+@app_commands.describe(role="اختر الرتبة التي تريد حساب نقاط التفاعل لأعضائها")
+async def reset_leaderboard(interaction: discord.Interaction, role: discord.Role):
+    # التحقق من الصلاحيات الإدارية من الـ config
+    if interaction.user.id not in getattr(config, "AUTHORIZED_USER_IDS", []):
+        await interaction.response.send_message("❌ عذراً، هذا الأمر متاح فقط للمطورين المصرح لهم.", ephemeral=True)
+        return
+        
+    guild_id = str(interaction.guild_id)
+    data = load_data()
+    
+    # تهيئة وتحديث بيانات السيرفر بالرتبة الجديدة وتصفير المستخدمين
+    data[guild_id] = {
+        "target_role_id": role.id,
+        "target_role_name": role.name,
+        "users": {}
+    }
+    save_data(data)
+        
+    await interaction.response.send_message(f"🔄 تم تصفير الليدبورد بنجاح! بدأ رصد التفاعل الصافي الآن لأصحاب رتبة: **{role.name}** 🎯")
+
+
+@bot.tree.command(name="توب", description="عرض لوحة الصدارة الحالية للرتبة المحددة")
 async def leaderboard(interaction: discord.Interaction):
     guild_id = str(interaction.guild_id)
     data = load_data()
     
-    if guild_id not in data or not data[guild_id]:
-        await interaction.response.send_message("📭 لا توجد بيانات تفاعل مسجلة لهذه الرتبة في هذا السيرفر بعد.", ephemeral=True)
+    guild_data = data.get(guild_id, {})
+    users_data = guild_data.get("users", {})
+    role_name = guild_data.get("target_role_name", "الرتبة المحددة")
+    
+    if not users_data:
+        await interaction.response.send_message(f"📭 لا توجد بيانات تفاعل مسجلة لرتبة (**{role_name}**) في هذا السيرفر بعد.", ephemeral=True)
         return
         
-    # ترتيب الأعضاء تنازلياً حسب عدد الرسائل الصافية
-    sorted_users = sorted(data[guild_id].items(), key=lambda item: item[1]["messages"], reverse=True)
+    # ترتيب الأعضاء تنازلياً
+    sorted_users = sorted(users_data.items(), key=lambda item: item[1]["messages"], reverse=True)
     
     embed = discord.Embed(
-        title="🏆 لوحة الصدارة الصافية (رتبة الوزير)",
-        description="ترتيب الأعضاء الأكثر تفاعلاً برتبة الوزير:",
-        color=discord.Color.gold()
+        title=f"🏆 لوحة الصدارة الصافية ({role_name})",
+        description=f"ترتيب الأعضاء الأكثر تفاعلاً من حاملي رتبة **{role_name}**:",
+        color=discord.Color.blue()
     )
     
     medals = ["🥇", "🥈", "🥉"]
     lines = []
     
-    for index, (user_id, user_info) in enumerate(sorted_users[:10]): # عرض أعلى 10 متفاعلين
+    for index, (user_id, user_info) in enumerate(sorted_users[:10]):
         prefix = medals[index] if index < 3 else f"**#{index + 1}**"
         lines.append(f"{prefix} <@{user_id}> - `{user_info['messages']}` رسالة صافية")
         
@@ -103,23 +130,6 @@ async def leaderboard(interaction: discord.Interaction):
     embed.set_footer(text=f"طلب بواسطة: {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
     
     await interaction.response.send_message(embed=embed)
-
-
-@bot.tree.command(name="انشاء-توب", description="تصفير وإعادة تهيئة نظام الليدبورد الصافي (للإدارة فقط)")
-async def reset_leaderboard(interaction: discord.Interaction):
-    # التحقق من الصلاحيات (أن يكون المستخدم مصرحاً له في ملف config)
-    if interaction.user.id not in getattr(config, "AUTHORIZED_USER_IDS", []):
-        await interaction.response.send_message("❌ عذراً، هذا الأمر متاح فقط لعمو زهير ومطوري النظام المعتمدين.", ephemeral=True)
-        return
-        
-    guild_id = str(interaction.guild_id)
-    data = load_data()
-    
-    if guild_id in data:
-        data[guild_id] = {}
-        save_data(data)
-        
-    await interaction.response.send_message("🔄 تم إعادة تهيئة وتصفير جدول الليدبورد بنجاح! بدأ رصد التفاعل الصافي من جديد.")
 
 # ------------------------------------------------------------------
 #  أحداث تشغيل البوت ومزامنة الأوامر
@@ -172,3 +182,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+ 
