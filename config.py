@@ -38,18 +38,24 @@ TRIGGER_WORDS = ["جلب زهير", "عمو", "ياوزير", "وزير"]
 COMMAND_PREFIX = "!"
 
 # اسم موديل Gemini الرسمي المدعوم عبر endpoint التوافق مع OpenAI
-# ملاحظة: كل موديلات 1.0 و1.5 متقاعدة نهائيًا من قوقل (ترجع 404) - gemini-3.5-flash هو المستقر الحالي
 AI_MODEL = "gemini-3.5-flash"
 
 # المهلة الزمنية لحماية البوت من التجميد والسبام (بالثواني)
-# فورية: للأوامر الإدارية (طرد/حظر/كتم/رتب أعضاء/عرض)
 try:
     COOLDOWN_FAST_SECONDS = float(os.environ.get("COOLDOWN_FAST_SECONDS", "2"))
 except ValueError:
     COOLDOWN_FAST_SECONDS = 2.0
 
-# طويلة: لأوامر الإنشاء والتعديل الهيكلي (قنوات/رتب/صلاحيات) وأي أمر غير مصنف
 try:
     COOLDOWN_SLOW_SECONDS = float(os.environ.get("COOLDOWN_SLOW_SECONDS", "6"))
 except ValueError:
     COOLDOWN_SLOW_SECONDS = 6.0
+
+# ======================================================================
+# 🏆 إعدادات نظام الليدبورد الصافي (توب التفاعل للرتبة)
+# ======================================================================
+# اسم الرتبة المراقبة التي سيتم حساب التوب لأعضائها (تستطيع تغيير "الوزير" لأي اسم رتبة تفضلها)
+AUTHORIZED_ROLE_NAME = os.environ.get("AUTHORIZED_ROLE_NAME", "الوزير")
+
+# مسار ملف حفظ بيانات النقاط والتفاعل تلقائياً داخل مجلد data
+LEADERBOARD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "leaderboard.json")
