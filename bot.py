@@ -76,9 +76,10 @@ async def on_message(message):
 @bot.tree.command(name="انشاء-توب", description="تصفير الليدبورد وتحديد الرتبة المطلوب رصد تفاعلها (للإدارة)")
 @app_commands.describe(role="اختر الرتبة التي تريد حساب نقاط التفاعل لأعضائها")
 async def reset_leaderboard(interaction: discord.Interaction, role: discord.Role):
-    # التحقق من الصلاحيات الإدارية من الـ config
-    if interaction.user.id not in getattr(config, "AUTHORIZED_USER_IDS", []):
-        await interaction.response.send_message("❌ عذراً، هذا الأمر متاح فقط للمطورين المصرح لهم.", ephemeral=True)
+    # التحقق من الصلاحية بالاعتماد على رتبة العضو بدل قائمة IDs
+    member = interaction.user
+    if not config.is_authorized_member(member):
+        await interaction.response.send_message("❌ عذراً، هذا الأمر متاح فقط لأصحاب الرتبة المصرح لها.", ephemeral=True)
         return
         
     guild_id = str(interaction.guild_id)
@@ -137,7 +138,10 @@ async def leaderboard(interaction: discord.Interaction):
 async def on_ready():
     log.info(f"✅ تم تسجيل الدخول باسم {bot.user} (ID: {bot.user.id})")
     log.info(f"🌐 متصل بـ {len(bot.guilds)} سيرفر")
-    log.info(f"🔑 الأشخاص المصرح لهم: {config.AUTHORIZED_USER_IDS}")
+    if getattr(config, "AUTHORIZED_ROLE_ID", None):
+        log.info(f"🔑 التصريح مفعّل عبر آيدي الرتبة: {config.AUTHORIZED_ROLE_ID}")
+    else:
+        log.info(f"🔑 التصريح مفعّل عبر اسم الرتبة: {config.AUTHORIZED_ROLE_NAME}")
     
     try:
         log.info("🔄 جاري مزامنة الأوامر المائلة (Slash Commands) مع ديسكورد...")
@@ -165,8 +169,8 @@ async def main():
         log.error("❌ لا يوجد أي مفتاح Gemini API معرّف. أضف مفتاح واحد على الأقل.")
         return
         
-    if not config.AUTHORIZED_USER_IDS:
-        log.warning("⚠️ لا يوجد أي شخص مصرح له (OWNER_ID فاضي) - البوت ما راح يستجيب لأي أحد.")
+    if not getattr(config, "AUTHORIZED_ROLE_ID", None) and not getattr(config, "AUTHORIZED_ROLE_NAME", None):
+        log.warning("⚠️ لا يوجد رتبة مصرح لها محددة (AUTHORIZED_ROLE_ID أو AUTHORIZED_ROLE_NAME فاضيين) - البوت ما راح يستجيب لأي أحد.")
 
     try:
         await bot.load_extension("architect")
