@@ -711,7 +711,7 @@ class Architect(commands.Cog):
             return
 
         if not self._is_authorized(message.author):
-            await message.reply("ولي انا بس لعمو زُهير وجاي وحليب الشيوعي هيهيهيهيهي")
+            await message.reply("ولي هيهيهيهيهي")
             return
 
         cooldown = classify_cooldown(query, self.cooldown_fast_seconds, self.cooldown_slow_seconds)
