@@ -19,19 +19,18 @@ GEMINI_API_KEYS = [
 # endpoint التوافق مع OpenAI الرسمي من قوقل - أكثر استقرارًا من مكتبة google.generativeai المتوقفة
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
+# ======================================================================
+# 🔐 نظام التصريح بالرتبة (بدل التصريح بأشخاص محددين)
+# ======================================================================
+# الأفضل والأدق: ضع آيدي الرتبة هنا (ثابت حتى لو تغيّر اسم الرتبة لاحقًا)
+_authorized_role_id_raw = os.environ.get("AUTHORIZED_ROLE_ID", "")
 try:
-    OWNER_ID = int(os.environ.get("OWNER_ID", "0"))
+    AUTHORIZED_ROLE_ID = int(_authorized_role_id_raw) if _authorized_role_id_raw.strip() else None
 except ValueError:
-    OWNER_ID = 0
+    AUTHORIZED_ROLE_ID = None
 
-_extra_ids = os.environ.get("AUTHORIZED_USER_IDS", "")
-AUTHORIZED_USER_IDS = set()
-for part in _extra_ids.split(","):
-    part = part.strip()
-    if part.isdigit():
-        AUTHORIZED_USER_IDS.add(int(part))
-if OWNER_ID:
-    AUTHORIZED_USER_IDS.add(OWNER_ID)
+# احتياطي بالاسم في حال ما وضعت آيدي (يُستخدم فقط لو AUTHORIZED_ROLE_ID فاضي)
+AUTHORIZED_ROLE_NAME = os.environ.get("AUTHORIZED_ROLE_NAME", "الوزير")
 
 # المناديات الخاصة بك
 TRIGGER_WORDS = ["جلب زهير", "عمو", "ياوزير", "وزير"]
@@ -55,7 +54,24 @@ except ValueError:
 # 🏆 إعدادات نظام الليدبورد الصافي (توب التفاعل للرتبة)
 # ======================================================================
 # اسم الرتبة المراقبة التي سيتم حساب التوب لأعضائها (تستطيع تغيير "الوزير" لأي اسم رتبة تفضلها)
-AUTHORIZED_ROLE_NAME = os.environ.get("AUTHORIZED_ROLE_NAME", "الوزير")
+LEADERBOARD_ROLE_NAME = os.environ.get("LEADERBOARD_ROLE_NAME", "الوزير")
 
 # مسار ملف حفظ بيانات النقاط والتفاعل تلقائياً داخل مجلد data
 LEADERBOARD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "leaderboard.json")
+
+
+def is_authorized_member(member) -> bool:
+    """
+    يتحقق فيما إذا كان العضو (discord.Member) يملك الرتبة المصرح لها.
+    يفضّل التحقق بالآيدي (AUTHORIZED_ROLE_ID) لأنه ثابت حتى لو تغيّر اسم الرتبة.
+    """
+    if member is None or not hasattr(member, "roles"):
+        return False
+
+    if AUTHORIZED_ROLE_ID:
+        return any(r.id == AUTHORIZED_ROLE_ID for r in member.roles)
+
+    if AUTHORIZED_ROLE_NAME:
+        return any(r.name == AUTHORIZED_ROLE_NAME for r in member.roles)
+
+    return False
