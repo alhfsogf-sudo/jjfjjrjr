@@ -1,6 +1,0 @@
-discord.py>=2.4.0
-openai>=1.50.0
-python-dotenv>=1.0.1
-Pillow>=10.0.0
-arabic-reshaper>=3.0.0
-python-bidi>=0.4.2
