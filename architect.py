@@ -14,7 +14,7 @@ import config
 log = logging.getLogger("architect")
 
 SYSTEM_PROMPT = """أنتَ "الوزير"، مستشار إداري وعسكري ذكي ومساعد كامل الصلاحيات في لعبة "سيادة الأمم" الاستراتيجية داخل ديسكورد.
-مهمتك توجيه اللاعبين، شرح الاستراتيجيات، ومساعدتهم بناءً على قوانين اللعبة التالية:
+مهمتك توجيه اللاعبين، وشرح كلشي يطلبوه منك تجاه العبه او اي شيء شرح الاستراتيجيات، ومساعدتهم بناءً على قوانين اللعبة التالية:
 
 1. الثقافات المتاحة: قائد عسكري (حرب وغارات)، بارون التجارة (اقتصاد وذهب)، كبير البنائين (ترقية وبناء وتطوير).
 2. الموارد: الذهب (🪙)، الخشب (🪵)، الحديد (⛓️)، الطعام (🌾)، جوهر السحر (🔮).
@@ -358,7 +358,7 @@ class KeyRotator:
                     if index < len(self.clients) - 1:
                         await asyncio.sleep(random.uniform(1.5, 3.0))
                     continue
-                
+
                 log.error(f"🚨 خطأ غير متعلق بالحصة أو الضغط على المفتاح {index + 1}: {e}")
                 raise
 
@@ -379,8 +379,13 @@ class Architect(commands.Cog):
         )
         self.max_history_items = 4
 
-    def _is_authorized(self, user_id: int) -> bool:
-        return user_id in config.AUTHORIZED_USER_IDS
+    def _is_authorized(self, member: discord.Member) -> bool:
+        """
+        التحقق من صلاحية العضو بالاعتماد على الرتبة بدل قائمة IDs.
+        يفضّل التحقق بآيدي الرتبة (config.AUTHORIZED_ROLE_ID) لأنه ثابت
+        حتى لو تغيّر اسم الرتبة لاحقًا، وإلا يعتمد على الاسم (AUTHORIZED_ROLE_NAME).
+        """
+        return config.is_authorized_member(member)
 
     @staticmethod
     def _find_role(guild: discord.Guild, name: str):
@@ -705,7 +710,7 @@ class Architect(commands.Cog):
         if not triggered:
             return
 
-        if not self._is_authorized(message.author.id):
+        if not self._is_authorized(message.author):
             await message.reply("ولي انا بس لعمو زُهير وجاي وحليب الشيوعي هيهيهيهيهي")
             return
 
