@@ -1,24 +1,27 @@
 """
-bot.py — نقطة الدخول الرئيسية للبوت.
+bot.py — نقطة الدخول الرئيسية للبوت (معدل للعمل مع الملفات على المستوى الرئيسي).
 """
 import discord
 from discord.ext import commands
 
 from config import DISCORD_TOKEN, GUILD_ID
-from database import init_pool, close_pool
 
+# تعديل الاستدعاءات لإزالة المجلد core
+from database import init_pool, close_pool, create_tables
+
+# تعديل أسماء الـ Cogs لإلغاء المجلد cogs.
 COGS = [
-    "cogs.onboarding",
-    "cogs.economy",
-    "cogs.buildings",
-    "cogs.military",
-    "cogs.combat",
-    "cogs.magic",
-    "cogs.alliances",
-    "cogs.market",
-    "cogs.world_events",
-    "cogs.admin",
-    "cogs.help",
+    "onboarding",
+    "economy",
+    "buildings",
+    "military",
+    "combat",
+    "magic",
+    "alliances",
+    "market",
+    "world_events",
+    "admin",
+    "help",
 ]
 
 
@@ -42,9 +45,9 @@ class SiyadaBot(commands.Bot):
             except Exception as e:
                 print(f"❌ فشل تحميل {cog}: {e}")
 
-        # تسجيل الأزرار الدائمة الإضافية (المستقلة عن الـ cogs الفردية)
-        from ui.main_menu import MainStatusView
-        from ui.battle_result_view import BattleResultView
+        # تعديل استدعاء ملفات الـ UI لإزالة المجلد ui
+        from main_menu import MainStatusView
+        from battle_result_view import BattleResultView
         self.add_view(MainStatusView())
         self.add_view(BattleResultView(loser_id=0, winner_id=0))  # placeholder ثابت custom_id فقط
 
