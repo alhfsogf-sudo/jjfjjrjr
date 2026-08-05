@@ -5,7 +5,7 @@ import discord
 from discord.ext import commands
 
 from config import DISCORD_TOKEN, GUILD_ID
-from core.database import init_pool, close_pool, create_tables
+from database import init_pool, close_pool
 
 COGS = [
     "cogs.onboarding",
